@@ -2498,7 +2498,7 @@ paths:
       - System
   /api/admin/upgrade:
     get:
-      description: Download latest version and restart server
+      description: Download the selected fork release, verify SHA256SUMS, and restart. Not limited by the default 60s request timeout.
       parameters:
       - description: Version to upgrade (e.g. 2.0.10 or latest)
         in: query

@@ -52,6 +52,27 @@ user-database:
 	require.True(t, *cfg.Storage.MinIO.IsEnabled)
 }
 
+func TestLoadConfigGitHubProxiesNilEmptyAndCustom(t *testing.T) {
+	unset, _, err := LoadConfig(writeTestConfig(t, "app: {}\n"))
+	require.NoError(t, err)
+	require.Nil(t, unset.App.GitHubProxies)
+
+	empty, _, err := LoadConfig(writeTestConfig(t, "app:\n  github-proxies: []\n"))
+	require.NoError(t, err)
+	require.NotNil(t, empty.App.GitHubProxies)
+	require.Empty(t, *empty.App.GitHubProxies)
+
+	custom, _, err := LoadConfig(writeTestConfig(t, "app:\n  github-proxies:\n    - https://example.test/\n"))
+	require.NoError(t, err)
+	require.Equal(t, []string{"https://example.test/"}, *custom.App.GitHubProxies)
+
+	require.NoError(t, empty.Save())
+	reloaded, _, err := LoadConfig(empty.File)
+	require.NoError(t, err)
+	require.NotNil(t, reloaded.App.GitHubProxies)
+	require.Empty(t, *reloaded.App.GitHubProxies)
+}
+
 func TestLoadConfigMCPDisableLocalhostProtection(t *testing.T) {
 	configPath := filepath.Join(t.TempDir(), "config.yaml")
 	err := os.WriteFile(configPath, []byte(`

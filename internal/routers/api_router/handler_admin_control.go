@@ -13,6 +13,7 @@ import (
 	"runtime"
 	"runtime/debug"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -38,7 +39,8 @@ import (
 // 使用 App Container 注入依赖
 type AdminControlHandler struct {
 	*Handler
-	wss *pkgapp.WebsocketServer
+	wss       *pkgapp.WebsocketServer
+	upgradeMu sync.Mutex
 }
 
 // NewAdminControlHandler creates AdminControlHandler instance
@@ -1113,9 +1115,12 @@ func (h *AdminControlHandler) GetSystemInfo(c *gin.Context) {
 	response.ToResponse(code.Success.WithData(data))
 }
 
-// Upgrade triggers server automatic upgrade
+// Upgrade triggers server automatic upgrade.
+// The download is not limited by default-context-timeout. pull-source=auto tries
+// GitHub and the configured accelerators, then refuses the archive unless it
+// matches the release SHA256SUMS. pull-source=github stays on GitHub directly.
 // @Summary Trigger server upgrade
-// @Description Download latest version and restart server
+// @Description Download the selected fork release, verify SHA256SUMS, and restart. Not limited by the default 60s request timeout.
 // @Tags System
 // @Produce json
 // @Security UserAuthToken
@@ -1160,9 +1165,32 @@ func (h *AdminControlHandler) Upgrade(c *gin.Context) {
 		response.ToResponse(code.ErrorInvalidParams.WithDetails(err.Error()))
 		return
 	}
+	sumsURL, err := fileurl.ServiceChecksumURL(version)
+	if err != nil {
+		response.ToResponse(code.ErrorInvalidParams.WithDetails(err.Error()))
+		return
+	}
 	versionRaw := strings.TrimPrefix(version, "v")
 
-	h.App.Logger().Info("Starting upgrade download", zap.String("url", downloadURL), zap.String("version", versionRaw))
+	if !h.upgradeMu.TryLock() {
+		response.ToResponse(code.ErrorServerBusy.WithDetails("An upgrade is already in progress"))
+		return
+	}
+	defer h.upgradeMu.Unlock()
+
+	// The API middleware cancels the request context after default-context-timeout
+	// (60s) and the server write timeout is also 60s. Neither may abort this download.
+	// 接口中间件会在 default-context-timeout（60 秒）取消请求上下文，服务写超时同样是 60 秒。
+	// 下载不能被这两处掐断。
+	dlCtx, cancel := context.WithTimeout(context.WithoutCancel(c.Request.Context()), fileurl.UpgradeBudget)
+	defer cancel()
+	extendWriteDeadline(c.Writer, fileurl.UpgradeBudget)
+
+	h.App.Logger().Info("Starting upgrade download",
+		zap.String("url", downloadURL),
+		zap.String("version", versionRaw),
+		zap.String("pullSource", cfg.App.PullSource),
+	)
 
 	// Prepare temp directory
 	// 使用配置中的 TempPath 作为临时目录
@@ -1173,9 +1201,20 @@ func (h *AdminControlHandler) Upgrade(c *gin.Context) {
 		return
 	}
 
-	// Download
 	tarPath := filepath.Join(tempDir, fileName)
-	if err := h.downloadFile(c.Request.Context(), downloadURL, tarPath); err != nil {
+	downloaded, err := fileurl.DownloadVerified(dlCtx, downloadURL, fileName, sumsURL, fileurl.ServiceFetchConfig{
+		Mode:    cfg.App.PullSource,
+		Proxies: cfg.App.GitHubProxies,
+		Hooks: fileurl.FetchHooks{
+			Warn: func(msg, rawURL string, err error) {
+				h.App.Logger().Warn(msg, zap.String("url", rawURL), zap.Error(err))
+			},
+			Info: func(msg, rawURL string) {
+				h.App.Logger().Info(msg, zap.String("url", rawURL))
+			},
+		},
+	}, tarPath)
+	if err != nil {
 		h.App.Logger().Error("Upgrade download failed",
 			zap.String("url", downloadURL),
 			zap.Error(err),
@@ -1183,6 +1222,11 @@ func (h *AdminControlHandler) Upgrade(c *gin.Context) {
 		response.ToResponse(code.Failed.WithDetails("Download failed: " + err.Error()))
 		return
 	}
+	h.App.Logger().Info("Upgrade archive verified",
+		zap.String("url", downloaded.URL),
+		zap.String("sha256", downloaded.SHA256),
+		zap.Bool("checksumFromGitHub", downloaded.ChecksumDirect),
+	)
 
 	// Extract
 	binaryName := "fast-note-sync-service"
@@ -1355,43 +1399,14 @@ func (h *AdminControlHandler) KickWSClient(c *gin.Context) {
 	response.ToResponse(code.Success.WithDetails("Client kicked successfully"))
 }
 
-func (h *AdminControlHandler) downloadFile(ctx context.Context, url string, dest string) error {
-	client := &http.Client{
-		Timeout: 3 * time.Minute,
-		Transport: &http.Transport{
-			TLSHandshakeTimeout:   30 * time.Second,
-			ResponseHeaderTimeout: 60 * time.Second,
-			IdleConnTimeout:       90 * time.Second,
-		},
+// extendWriteDeadline keeps a long upgrade response from being cut off by the
+// server's write timeout. A writer that cannot set a deadline is left unchanged;
+// the download context is still independent of the request timeout.
+func extendWriteDeadline(w http.ResponseWriter, d time.Duration) {
+	if w == nil || d <= 0 {
+		return
 	}
-
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
-	if err != nil {
-		return fmt.Errorf("create request failed: %w", err)
-	}
-
-	resp, err := client.Do(req)
-	if err != nil {
-		return fmt.Errorf("download request failed: %w", err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("bad status: %s", resp.Status)
-	}
-
-	out, err := os.Create(dest)
-	if err != nil {
-		return fmt.Errorf("create file failed: %w", err)
-	}
-	defer out.Close()
-
-	_, err = io.Copy(out, resp.Body)
-	if err != nil {
-		return fmt.Errorf("save file failed: %w", err)
-	}
-
-	return nil
+	_ = http.NewResponseController(w).SetWriteDeadline(time.Now().Add(d))
 }
 
 func (h *AdminControlHandler) extractBinary(tarPath string, destDir string, binaryName string) error {

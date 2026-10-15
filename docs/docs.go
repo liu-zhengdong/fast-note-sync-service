@@ -524,7 +524,7 @@ const docTemplate = `{
                         "UserAuthToken": []
                     }
                 ],
-                "description": "Download latest version and restart server",
+                "description": "Download the selected fork release, verify SHA256SUMS, and restart. Not limited by the default 60s request timeout.",
                 "produces": [
                     "application/json"
                 ],

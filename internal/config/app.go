@@ -71,6 +71,15 @@ type AppSettings struct {
 	// PullSource data pull source: auto | github | cnb
 	// PullSource 数据拉取源：auto | github | cnb
 	PullSource string `yaml:"pull-source" default:"auto"`
+	// GitHubProxies are accelerator prefixes used for this fork's version check and
+	// in-app upgrade when PullSource is not "github". A nil pointer means the built-in
+	// list (gh-proxy.com, ghfast.top, gh-proxy.org). A non-nil empty slice disables
+	// accelerators. Each prefix is joined in front of the full GitHub URL.
+	// pull-source=github ignores this field and talks to GitHub directly.
+	// GitHubProxies 在 pull-source 不是 github 时，用于本仓库版本检查和一键升级的加速前缀。
+	// nil 用内置列表；显式空列表表示不用代理。实际地址是「前缀 + 完整 GitHub URL」。
+	// 必须是指针：缺省（nil）和显式空列表要能区分，二次 defaults.Set 才不会把空列表填回默认。
+	GitHubProxies *[]string `yaml:"github-proxies,omitempty"`
 	// PullReleaseChannel update version channel: stable | beta
 	// PullReleaseChannel 更新版本通道：stable（正式版） | beta（测试版）
 	PullReleaseChannel string `yaml:"pull-release-channel" default:"stable"`
@@ -81,8 +90,8 @@ type AppSettings struct {
 
 	FtsBleveEnabled  *bool `yaml:"fts-bleve-enabled" default:"true"`    // Bleve FTS enabled flag // 是否启用 Bleve 全文搜索（默认启用）
 	FtsBleveStoreRaw *bool `yaml:"fts-bleve-store-raw" default:"false"` // Bleve FTS store raw content flag // Bleve 全文搜索是否存储原始文本（默认启用为方案 B，若设为 false 则为仅索引不存储的方案 A）
-	SyncDownChunkNum int `yaml:"sync-down-chunk-num" default:"200"` // Serial download sync page chunk size // 串行下载同步的分块数量
-	SyncUpChunkNum   int `yaml:"sync-up-chunk-num" default:"100"`  // Serial upload sync batch size // 串行上传同步的分包大小
+	SyncDownChunkNum int   `yaml:"sync-down-chunk-num" default:"200"`   // Serial download sync page chunk size // 串行下载同步的分块数量
+	SyncUpChunkNum   int   `yaml:"sync-up-chunk-num" default:"100"`     // Serial upload sync batch size // 串行上传同步的分包大小
 
 	// PipelineWindowUp negotiated upload sliding-window size for pv>=2 connections; 0 disables
 	// the window (stop-and-wait, same as pre-3.6.0 behavior — this is the runtime rollback
@@ -138,4 +147,3 @@ func (a AppSettings) PipelineWindowDownClamped() int {
 	}
 	return clampWindow(*a.PipelineWindowDown, 16)
 }
-

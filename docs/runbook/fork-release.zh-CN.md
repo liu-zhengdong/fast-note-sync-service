@@ -1,6 +1,6 @@
 # 自有发行与线上升级
 
-服务端版本检查及后台一键升级仅使用 `liu-zhengdong/fast-note-sync-service` 的 GitHub Releases。插件版本检查仍使用插件上游。GitHub 不可达时服务更新失败，不回退到官方服务程序。
+服务端版本检查及后台一键升级只使用 `liu-zhengdong/fast-note-sync-service` 的 GitHub Releases。`pull-source` 为 `auto`（默认）时，直连失败或下载过慢会改用 `github-proxies` 里的加速前缀访问同一份发布文件，并用该 Release 的 `SHA256SUMS` 校验后才替换程序。`pull-source: github` 只走直连。插件版本检查仍使用插件上游。不会回退到官方服务程序。升级下载不受接口默认 60 秒超时限制。
 
 发布一个 `v3.6.2` 形式的 tag 会触发 `.github/workflows/fork-release.yml`：测试、构建六个平台的静态程序包、发布 amd64/arm64 GHCR 镜像，镜像成功后才发布 Release。更新包保留原始 tag：`fast-note-sync-service-v3.6.2-linux-amd64.tar.gz`。Release 包和 Docker 使用相同提交。
 

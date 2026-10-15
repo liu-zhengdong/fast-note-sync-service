@@ -155,7 +155,23 @@ app:
 
   # 数据拉取源设置: auto(自动检测) | github | cnb
   # Data pull source setting: auto(detect) | github | cnb
+  # auto（默认）: 服务端版本检查和一键升级先走 GitHub，失败或过慢再试下面的加速代理。
+  # github: 服务端只走 GitHub 直连，忽略 github-proxies。
+  # cnb: 只影响插件源；服务端没有 CNB 发布，升级仍走 GitHub 加速代理。
   pull-source: auto
+
+  # GitHub 加速前缀，仅当 pull-source 不是 github 时用于服务端版本检查和一键升级。
+  # 实际请求是「前缀 + 完整 GitHub URL」，例如：
+  # https://gh-proxy.com/https://github.com/liu-zhengdong/fast-note-sync-service/releases/download/v3.6.5/SHA256SUMS
+  # 不写这一项时使用内置列表（与下面三项相同）。写成空列表 github-proxies: [] 表示禁用代理。
+  # 下载的安装包必须对上该版本 Release 里的 SHA256SUMS，代理不能改包。
+  # GitHub accelerator prefixes for service version checks and in-app upgrades
+  # when pull-source is not github. The request URL is "<prefix><full GitHub URL>".
+  # Omit the key to use this built-in list. An empty list disables proxies.
+  github-proxies:
+    - https://gh-proxy.com/
+    - https://ghfast.top/
+    - https://gh-proxy.org/
 
   # 是否启用 Bleve 全文搜索。
   # true (默认): 启用 Bleve 全文搜索，支持 searchMode=content 检索。

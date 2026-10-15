@@ -50,8 +50,9 @@ type ProbeSnapshot struct {
 	At        time.Time // when this snapshot was taken
 }
 
-// SourceSelector selects upstream plugin sources (GitHub or CNB). Service upgrades bypass it.
-// SourceSelector 处理选择数据源（GitHub 或 CNB）的逻辑。
+// SourceSelector selects upstream plugin sources (GitHub or CNB).
+// Service upgrades do not use it; they have their own accelerator list.
+// SourceSelector 处理插件的数据源（GitHub 或 CNB）。服务端升级不走这里。
 //
 // Concurrency: IsGitHub / Probe / Snapshot / SetMode are all goroutine-safe.
 // 并发安全：所有公开方法均可被多个 goroutine 并发调用（后台任务、HTTP handler、

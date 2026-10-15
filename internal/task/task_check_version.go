@@ -3,6 +3,7 @@ package task
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -86,10 +87,11 @@ func (t *CheckVersionTask) Name() string {
 }
 
 func (t *CheckVersionTask) Run(ctx context.Context) error {
-	// Service releases never use plugin mirror selection or fallback.
-	serviceReleases, err := t.fetchGitHubReleasesCtx(ctx, GitHubServiceReleaseURL)
+	// Service releases stay on this fork. pull-source=github is direct only;
+	// auto (and cnb, which has no service mirror) retry the same API via accelerators.
+	serviceReleases, err := t.fetchServiceReleases(ctx)
 	if err != nil {
-		return fmt.Errorf("fetch service releases: %w", err)
+		return err
 	}
 	serviceLink, serviceChangelog, serviceChangelogContent := buildLinks(serviceReleases, true, true)
 
@@ -157,7 +159,7 @@ func (t *CheckVersionTask) fetchReleasesWithFallback(
 	ctx context.Context, ghURL, cnbURL, cnbToken string, isService, githubFirst bool,
 ) (usedGitHub bool, releases []pkgapp.HistoricalVersion, link, changelogLink, changelogContent string, err error) {
 	if isService {
-		releases, err = t.fetchGitHubReleasesCtx(ctx, GitHubServiceReleaseURL)
+		releases, err = t.fetchServiceReleases(ctx)
 		link, changelogLink, changelogContent = buildLinks(releases, true, true)
 		return true, releases, link, changelogLink, changelogContent, err
 	}
@@ -265,6 +267,7 @@ func (t *CheckVersionTask) fetchGitHubReleasesCtx(ctx context.Context, url strin
 	if err != nil {
 		return nil, err
 	}
+	req.Header.Set("User-Agent", fileurl.UserAgent)
 	cli := &http.Client{Timeout: fetchHTTPTimeout}
 	resp, err := cli.Do(req)
 	if err != nil {
@@ -295,7 +298,7 @@ func (t *CheckVersionTask) fetchGitHubReleasesCtx(ctx context.Context, url strin
 		if !hasValidAssets(release.Assets) {
 			continue
 		}
-		if url == GitHubServiceReleaseURL {
+		if fileurl.IsServiceReleaseList(url) {
 			_, fileName, err := fileurl.ServiceDownload(release.TagName, runtime.GOOS, runtime.GOARCH)
 			if err != nil {
 				continue
@@ -329,6 +332,34 @@ func (t *CheckVersionTask) fetchGitHubReleasesCtx(ctx context.Context, url strin
 	}
 
 	return result, nil
+}
+
+// fetchServiceReleases reads this fork's GitHub release list. In every mode except
+// pull-source=github, a failed direct call is retried through github-proxies.
+// Accelerators only front the same API URL; CNB and the upstream repository are never used.
+func (t *CheckVersionTask) fetchServiceReleases(ctx context.Context) ([]pkgapp.HistoricalVersion, error) {
+	mode := ""
+	var proxies *[]string
+	if cfg := t.app.Config(); cfg != nil {
+		mode = cfg.App.PullSource
+		proxies = cfg.App.GitHubProxies
+	}
+	var errs []error
+	for _, u := range fileurl.ServiceReleaseListURLs(mode, proxies) {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		releases, err := t.fetchGitHubReleasesCtx(ctx, u)
+		if err == nil {
+			if u != fileurl.ServiceReleaseAPI {
+				t.app.Logger().Info("check_version: service releases fetched via accelerator", zap.String("url", u))
+			}
+			return releases, nil
+		}
+		errs = append(errs, fmt.Errorf("%s: %w", u, err))
+		t.app.Logger().Warn("check_version: service release source failed", zap.String("url", u), zap.Error(err))
+	}
+	return nil, fmt.Errorf("fetch service releases: %w", errors.Join(errs...))
 }
 
 func (t *CheckVersionTask) fetchCNBVersionCtx(ctx context.Context, url string, token string) ([]pkgapp.HistoricalVersion, error) {

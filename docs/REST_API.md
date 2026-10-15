@@ -1208,7 +1208,7 @@ Schema: `app.Res`
 ### Trigger server upgrade
 **Endpoint**: `GET /api/admin/upgrade`
 
-Download latest version and restart server
+Download the selected fork release, verify SHA256SUMS, and restart. The call is not limited by the default 60s request timeout.
 
 **Parameters**:
 | Name | In | Type | Required | Description |
