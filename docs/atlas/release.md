@@ -2,7 +2,7 @@
 kind: part
 parent: README.md
 code: [.github/workflows/, pkg/fileurl/service_release.go, pkg/fileurl/service_fetch.go, internal/task/task_check_version.go, internal/routers/api_router/handler_admin_control.go, internal/config/app.go, docker/, internal/app/version.go]
-verified: 2026-10-14 @ 4cf8ffac
+verified: 2026-10-15 @ 7eb516c9
 ---
 # 发布与升级
 
